@@ -92,6 +92,15 @@ fi
 
 install_magisk
 
+# PICASSO: env_check expects a block device at \$MAGISKTMP/.magisk/device/preinit;
+# daemon does not create it on legacy data-as-preinit devices -> create via service.d
+if [ -d /data/adb ]; then
+  mkdir -p /data/adb/service.d
+  printf '#!/system/bin/sh\nD=/sbin/.magisk/device\nmkdir -p \x24D\n[ -b \x24D/preinit ] || ln -sf /dev/block/mmcblk0p8 \x24D/preinit\n' \
+    > /data/adb/service.d/99-picasso-preinit.sh
+  chmod 755 /data/adb/service.d/99-picasso-preinit.sh
+fi
+
 # Cleanups
 $BOOTMODE || recovery_cleanup
 rm -rf $TMPDIR

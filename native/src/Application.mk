@@ -1,5 +1,5 @@
 APP_BUILD_SCRIPT := src/Android.mk
-APP_CFLAGS       := -Wall -Oz -fomit-frame-pointer -D_FILE_OFFSET_BITS=64
+APP_CFLAGS       := -mfpu=vfpv3-d16 -Wall -Oz -fomit-frame-pointer -D_FILE_OFFSET_BITS=64
 APP_CPPFLAGS     := -std=c++23
 APP_STL          := none
 APP_PLATFORM     := android-24
@@ -28,3 +28,4 @@ APP_CFLAGS       += -fno-unwind-tables -fno-asynchronous-unwind-tables -fno-stac
 NDK_APP_OUT      := $(NDK_APP_OUT)-nolibc
 
 endif
+APP_LDFLAGS      += -Xlinker -mllvm -Xlinker -mattr=-neon,-d32

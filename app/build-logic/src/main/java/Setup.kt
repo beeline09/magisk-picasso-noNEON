@@ -132,15 +132,12 @@ fun Project.setupCoreLib() {
                 for (abi in abiList) {
                     into(abi) {
                         from(rootFile("native/out/$abi")) {
-                            include("magiskboot", "magiskinit", "magiskpolicy", "magisk", "libinit-ld.so")
+                            include("magiskboot", "magiskinit", "magiskpolicy", "magisk", "libinit-ld.so", "busybox", "bootctl")
                             rename { if (it.endsWith(".so")) it else "lib$it.so" }
                         }
                     }
                 }
-                from(zipTree(downloadFile(BUSYBOX_DOWNLOAD_URL, BUSYBOX_ZIP_CHECKSUM)))
-                include(abiList.map { "$it/libbusybox.so" })
-                from(zipTree(downloadFile(BOOTCTL_DOWNLOAD_URL, BOOTCTL_ZIP_CHECKSUM)))
-                include(abiList.map { "$it/libbootctl.so" })
+                // PICASSO: busybox/bootctl built locally (no NEON), see native/out
                 onlyIf {
                     if (inputs.sourceFiles.files.size != abiList.size * 7)
                         throw StopExecutionException("Please build binaries first! (./build.py binary)")

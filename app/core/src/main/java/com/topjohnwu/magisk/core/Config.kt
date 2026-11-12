@@ -85,7 +85,7 @@ object Config : PreferenceConfig, DBConfig {
     var themeOrdinal by preference(Key.THEME_ORDINAL, 0)
     var colorMode by preference(Key.COLOR_MODE, ColorMode.MONET_SYSTEM.value)
 
-    private var checkUpdatePrefs by preference(Key.CHECK_UPDATES, true)
+    private var checkUpdatePrefs by preference(Key.CHECK_UPDATES, false) /* PICASSO: no updates - official builds have NEON */
     private var localePrefs by preference(Key.LOCALE, "")
     var doh by preference(Key.DOH, false)
     var updateChannel by preference(Key.RELEASE_CHANNEL, Value.DEFAULT_CHANNEL)

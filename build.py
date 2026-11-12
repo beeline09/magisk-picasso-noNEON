@@ -22,7 +22,7 @@ from scripts.env import *
 # Common constants
 support_abis = {
     "arm64-v8a": "aarch64-linux-android",
-    "armeabi-v7a": "thumbv7neon-linux-androideabi",
+    "armeabi-v7a": "armv7-linux-androideabi",
     "x86_64": "x86_64-linux-android",
     "x86": "i686-linux-android",
     "riscv64": "riscv64-linux-android",

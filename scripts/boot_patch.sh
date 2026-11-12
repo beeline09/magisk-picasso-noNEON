@@ -108,6 +108,23 @@ for path in ramdisk.cpio vendor_ramdisk/init_boot.cpio vendor_ramdisk/ramdisk.cp
   fi
 done
 
+# PICASSO: magiskboot's Rust cpio parser silently skips entries of our
+# legacy ramdisk cpio (0 records visible). Re-archive with busybox cpio
+# BEFORE any use (status test, .orig copy, backup).
+if [ -n "$RAMDISK" ] && [ -z "$(./magiskboot cpio $RAMDISK ls 2>/dev/null | grep -v '^Loading')" ]; then
+  ui_print "- PICASSO: re-archiving legacy ramdisk cpio"
+  RB="$PWD/.rb"
+  mkdir -p "$RB"
+  (cd "$RB" && rm -rf ./* 2>/dev/null; cpio -idm < ../$RAMDISK && find . | grep -v '^\.$' | sed 's|^\./||' | cpio -o -H newc > ../$RAMDISK.new)
+  if [ -s $RAMDISK.new ]; then
+    mv -f $RAMDISK.new $RAMDISK
+  else
+    rm -f $RAMDISK.new
+    abort "! PICASSO: ramdisk re-archive failed"
+  fi
+  rm -rf "$RB"
+fi
+
 ui_print "- Checking ramdisk status"
 if [ -n "$RAMDISK" ]; then
   ./magiskboot cpio $RAMDISK test

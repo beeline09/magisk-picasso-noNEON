@@ -22,3 +22,7 @@ profile-rustflags = true
 
 [profile.release]
 rustflags = ["-Z", "location-detail=none", "-Z", "fmt-debug=none"]
+
+# picasso (Tegra 2): VFPv3-D16, no NEON
+[target.armv7-linux-androideabi]
+rustflags = ["-Z", "dwarf-version=4", "-C", "linker-plugin-lto", "-C", "force-unwind-tables=no", "-C", "target-feature=-neon,-d32,+vfp3d16"]

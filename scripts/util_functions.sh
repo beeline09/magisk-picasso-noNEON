@@ -116,6 +116,17 @@ setup_flashable() {
 }
 
 ensure_bb() {
+  # PICASSO: vanilla busybox ash has no real standalone mode;
+  # install applet symlinks FIRST so all scripts use our applets
+  # (mount -t ext4 etc.) instead of recovery's old /sbin tools
+  local pbb=$TMPDIR/busybox
+  [ -x $pbb ] || pbb=$MAGISKBIN/busybox
+  if [ -x $pbb ]; then
+    local pbdir="$(dirname "$pbb")/bb"
+    mkdir -p "$pbdir"
+    $pbb --install -s "$pbdir" 2>/dev/null
+    export PATH="$pbdir:$PATH"
+  fi
   if set -o | grep -q standalone; then
     # We are definitely in busybox ash
     set -o standalone
@@ -204,6 +215,15 @@ recovery_cleanup() {
 # find_block [partname...]
 find_block() {
   local BLOCK DEV DEVICE DEVNAME PARTNAME UEVENT
+  # PICASSO (Acer Iconia A500/A501): no by-name nodes, no PARTNAME in sysfs
+  for BLOCK in "$@"; do
+    case "$BLOCK" in
+      system|system$SLOT) [ -b /dev/block/mmcblk0p3 ] && echo /dev/block/mmcblk0p3 && return 0 ;;
+      cache)  [ -b /dev/block/mmcblk0p6 ] && echo /dev/block/mmcblk0p6 && return 0 ;;
+      data)   [ -b /dev/block/mmcblk0p8 ] && echo /dev/block/mmcblk0p8 && return 0 ;;
+      boot)   [ -b /dev/block/mmcblk0p2 ] && echo /dev/block/mmcblk0p2 && return 0 ;;
+    esac
+  done
   for BLOCK in "$@"; do
     DEVICE=$(find /dev/block \( -type b -o -type c -o -type l \) -iname $BLOCK | head -n 1) 2>/dev/null
     if [ ! -z $DEVICE ]; then
@@ -254,7 +274,8 @@ mount_name() {
   mount $FLAG $POINT 2>/dev/null
   if ! is_mounted $POINT; then
     local BLOCK=$(find_block $PART)
-    mount $FLAG $BLOCK $POINT || return
+    # PICASSO: busybox has no fstype autodetect in recovery, try ext4 first
+    mount -t ext4 $FLAG $BLOCK $POINT || mount $FLAG $BLOCK $POINT || return
   fi
   ui_print "- Mounting $POINT"
 }
@@ -389,6 +410,10 @@ find_boot_image() {
   elif [ -e "/dev/block/by-name/boot$SLOT" ]; then
     # Standard location since AOSP Android 10+
     BOOTIMAGE="/dev/block/by-name/boot$SLOT"
+  elif grep -qs "picasso\|Acer A500" /proc/device-tree/model 2>/dev/null && \
+      [ -b /dev/block/mmcblk0p2 ]; then
+    # PICASSO (Acer Iconia A500/A501): no by-name symlinks, boot = mmcblk0p2
+    BOOTIMAGE=/dev/block/mmcblk0p2
   elif [ -n "$SLOT" ]; then
     # Fallback for A/B devices running < Android 10
     BOOTIMAGE=$(find_block "ramdisk$SLOT" "boot$SLOT")

@@ -17,8 +17,26 @@ cd magisk-picasso-noNEON
 # Требуется: JDK 25, Android SDK (build-tools 37, platform 37.1)
 python3 build.py ndk       # скачать ONDK (~2 ГБ)
 python3 build.py -r native # бинарники без NEON (~5 мин)
+
+# ⚠️ ОБЯЗАТЕЛЬНО: поместить busybox и bootctl в native/out/armeabi-v7a/
+# (pre-built musl busybox — НЕ bionic! — см. раздел "Prerequisites" ниже)
+cp ~/magisk-bins/busybox ~/magisk-bins/bootctl native/out/armeabi-v7a/
+
 python3 build.py -r app    # APK = flashable zip
 ```
+
+## Prerequisites: busybox и bootctl
+
+APK build требует два файла в `native/out/armeabi-v7a/`:
+
+| Файл | Что это | Где взять |
+|---|---|---|
+| `busybox` | busybox 1.36.1 на **musl** (не bionic!) | Собрать по [инструкции](../../Docs/howto-build-magisk.md) раздел 6 |
+| `bootctl` | Заглушка exit(1) — picasso не A/B | `echo 'int main(){return 1;}' > bootctl.c && arm-musl-clang bootctl.c -o bootctl` |
+
+**Почему musl, а не bionic?** Статическая линковка bionic тянет NEON из libm (pow, strtod, qsort) → SIGILL на Tegra 2. Musl — чистый C без NEON.
+
+**Важно:** busybox требует патч ash.c (добавить `standalone` в set -o таблицу) — Magisk's ensure_bb проверяет эту опцию. Детали в howto-build-magisk.md.
 
 ## Установка на планшет
 

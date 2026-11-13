@@ -50,6 +50,9 @@ esac
 "$LLVM/bin/clang" --version | head -1   # должен быть clang 21.0.0
 "$NDK/toolchains/rust/bin/rustc" --version  # rustc 1.97.1-nightly
 
+# Magisk build.py проверяет ndk/ONDK_VERSION == r30.1 (метка нашей надстройки над NDK)
+[ -f "$NDK/ONDK_VERSION" ] || echo "r30.1" > "$NDK/ONDK_VERSION"
+
 echo "--- Подмена libunwind (чистый, vfpv3-d16, без d16-d31)"
 # это ЕДИНСТВЕННЫЙ arm-путь unwind в NDK (проверено по рабочей сборке)
 cp "$LLVM/lib/clang/21/lib/linux/arm/libunwind.a" "$LLVM/lib/clang/21/lib/linux/arm/libunwind.a.stock" 2>/dev/null || true

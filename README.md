@@ -33,23 +33,31 @@ version=31.1-picasso-noNEON
 versionCode=31100
 EOF
 export JAVA_HOME=/usr/lib/jvm/java-25-openjdk-amd64
+# КРИТИЧНО: cc-крейты (C/C++ зависимости) обязаны собираться без NEON —
+# дефолт --target=armv7-linux-androideabi включает NEON!
+export CFLAGS_armv7_linux_androideabi="-mfpu=vfpv3-d16 -mthumb"
+export CXXFLAGS_armv7_linux_androideabi="-mfpu=vfpv3-d16 -mthumb"
 python3 build.py -r native
 # Результат: native/out/armeabi-v7a/{magisk,magiskboot,magiskinit,magiskpolicy}
 
-# 4. busybox + bootctl (НЕ собираются build.py!)
+# 4. crt0-патч: NEON-обнуление структуры в _start_main -> strd
+#    (vmov.i32 q8 + vst1.64 {d16,d17} на Tegra 2 = SIGILL)
+python3 tools/picasso/patch-crt0.py \
+  native/out/armeabi-v7a/{magisk,magiskboot,magiskinit,magiskpolicy}
+
+# 5. busybox + bootctl (НЕ собираются build.py!)
 cp tools/picasso/prebuilt/busybox-1.36.1-musl native/out/armeabi-v7a/busybox
 cp tools/picasso/prebuilt/bootctl             native/out/armeabi-v7a/bootctl
 # (или собрать busybox с нуля: tools/picasso/build-busybox.sh ~/magisk-sdk/ndk/magisk out)
 
-# 5. Проверка NEON — ОБЯЗАТЕЛЬНО до прошивки!
+# 6. Проверка NEON — ОБЯЗАТЕЛЬНО до прошивки!
 tools/picasso/neon_check.sh native/out/armeabi-v7a/{magisk,magiskboot,magiskinit,magiskpolicy}
-tools/picasso/neon_check.sh native/out/armeabi-v7a/busybox  # busybox должен быть НЕстрипнут (см. ниже)
 
-# 6. APK/установщик (это один и тот же файл: APK = flashable zip)
+# 7. APK/установщик (это один и тот же файл: APK = flashable zip)
 python3 build.py -r app
 # Результат: out/app-release.apk = Magisk-v31.1-picasso.zip
 
-# 7. Удалятор (замена updater-script + JAR-подпись)
+# 8. Удалятор (замена updater-script + JAR-подпись)
 python3 tools/picasso/make-uninstaller.py out/app-release.apk remove-magisk.zip tools/picasso/signing
 ```
 
@@ -58,8 +66,10 @@ python3 tools/picasso/make-uninstaller.py out/app-release.apk remove-magisk.zip 
 | Компонент | Проблема на Tegra 2 | Решение |
 |---|---|---|
 | Rust-код | rustc включает NEON по умолчанию | `target-feature=-neon,-d32,+vfpv3-d16` (native/src/.cargo/config.toml) |
-| libunwind (NDK) | ассемблер использует d16–d31 | `tools/picasso/prebuilt/libunwind-tegra2.a` кладётся в NDK (см. setup-ndk-picasso.sh) |
-| compiler-rt builtins (NDK) | scalbnl и др. с NEON/d16 | `tools/picasso/prebuilt/libaeabi-clean.a` заменяет `libclang_rt.builtins*arm*android*.a` |
+| C/C++ крейты (cc/cxx) | дефолт таргета androideabi = NEON | `CFLAGS_armv7_linux_androideabi="-mfpu=vfpv3-d16 -mthumb"` в окружении |
+| libunwind (NDK) | ассемблер использует d16–d31 | `prebuilt/libunwind-tegra2.a` кладётся в NDK (setup-ndk-picasso.sh) |
+| compiler-rt builtins (NDK) | scalbnl/frexpl c d16-регистрами | `prebuilt/libaeabi-clean.a` (+чистые scalbn/frexp/ldexp, clear_cache) заменяет `libclang_rt.builtins-arm-android.a` |
+| crt0 `_start_main` | `vmov.i32 q8`+`vst1.64 {d16,d17}` = NEON | байтовый патч `tools/picasso/patch-crt0.py` (→ `mov.w r12`+`strd`) |
 | busybox | статик на bionic тянет NEON из libm | сборка на musl 1.2.5, конфиг и ash-патч в `tools/picasso/` |
 | bootctl | A/B-утилита не нужна (picasso не A/B) | заглушка `int main(){return 1;}` |
 

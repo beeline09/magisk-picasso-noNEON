@@ -1,143 +1,120 @@
-# Magisk v31.1 noNEON для Tegra 2 (Acer Iconia Tab A500/A501)
+# Magisk v31.1 noNEON — NVIDIA Tegra 2 (Acer Iconia Tab A500/A501, picasso)
 
-Fork of [Magisk v31.1](https://github.com/topjohnwu/Magisk) by [topjohnwu](https://github.com/topjohnwu),
-patched for NVIDIA Tegra 2 (ARMv7 + VFPv3-D16, **no NEON**).
+Форк [Magisk v31.1](https://github.com/topjohnwu/Magisk) от [topjohnwu](https://github.com/topjohnwu),
+пересобранный для NVIDIA Tegra 2: **ARMv7 + VFPv3-D16, БЕЗ NEON**.
 
-## Почему форк
+Все официальные сборки Magisk содержат NEON-инструкции → SIGILL (крах) на Tegra 2.
+Нативные части здесь собраны clang 21 / rustc 1.97-nightly с `target-feature=-neon,-d32,+vfpv3-d16`,
+с чистыми заменами `libunwind` и compiler-rt builtins (см. `tools/picasso/`).
 
-Все официальные сборки Magisk содержат NEON-инструкции → SIGILL на Tegra 2.
-Этот форк пересобирает все нативные компоненты без NEON.
+> ⚠️ **НИКОГДА не обновляйте из приложения/сети** — официальные апдейты содержат NEON → бутлуп.
 
-## Быстрая сборка
+## Быстрая сборка (Linux x86_64)
+
+Нужны: `git python3 unzip zip curl openjdk-25-jdk openssl` (JDK 25 обязателен, проверяется build.py).
 
 ```bash
-git clone https://github.com/beeline09/magisk-picasso-noNEON
+# 1. Клонировать (сабмодули обязательны!)
+git clone --recursive https://github.com/beeline09/magisk-picasso-noNEON.git
 cd magisk-picasso-noNEON
 
-# Требуется: JDK 25, Android SDK (build-tools 37, platform 37.1)
-python3 build.py ndk       # скачать ONDK (~2 ГБ)
-python3 build.py -r native # бинарники без NEON (~5 мин)
+# 2. Android SDK + NDK r30-beta2 (класть НЕ в каталог репо!)
+export ANDROID_HOME=~/magisk-sdk           # любой путь вне репо
+mkdir -p $ANDROID_HOME
+#   build-tools/platforms ставятся при сборке app автоматически (gradle),
+#   но licences нужно принять заранее:
+#   yes | sdkmanager --licenses (после установки cmdline-tools)
+tools/picasso/setup-ndk-picasso.sh          # NDK r30-beta2 -> $ANDROID_HOME/ndk/magisk + подмены
 
-# ⚠️ ОБЯЗАТЕЛЬНО: поместить busybox и bootctl в native/out/armeabi-v7a/
-# (pre-built musl busybox — НЕ bionic! — см. раздел "Prerequisites" ниже)
-cp ~/magisk-bins/busybox ~/magisk-bins/bootctl native/out/armeabi-v7a/
+# 3. Нативные бинари (без NEON)
+cat > config.prop <<'EOF'
+abiList=armeabi-v7a
+version=31.1-picasso-noNEON
+versionCode=31100
+EOF
+export JAVA_HOME=/usr/lib/jvm/java-25-openjdk-amd64
+python3 build.py -r native
+# Результат: native/out/armeabi-v7a/{magisk,magiskboot,magiskinit,magiskpolicy}
 
-python3 build.py -r app    # APK = flashable zip
+# 4. busybox + bootctl (НЕ собираются build.py!)
+cp tools/picasso/prebuilt/busybox-1.36.1-musl native/out/armeabi-v7a/busybox
+cp tools/picasso/prebuilt/bootctl             native/out/armeabi-v7a/bootctl
+# (или собрать busybox с нуля: tools/picasso/build-busybox.sh ~/magisk-sdk/ndk/magisk out)
+
+# 5. Проверка NEON — ОБЯЗАТЕЛЬНО до прошивки!
+tools/picasso/neon_check.sh native/out/armeabi-v7a/{magisk,magiskboot,magiskinit,magiskpolicy}
+tools/picasso/neon_check.sh native/out/armeabi-v7a/busybox  # busybox должен быть НЕстрипнут (см. ниже)
+
+# 6. APK/установщик (это один и тот же файл: APK = flashable zip)
+python3 build.py -r app
+# Результат: out/app-release.apk = Magisk-v31.1-picasso.zip
+
+# 7. Удалятор (замена updater-script + JAR-подпись)
+python3 tools/picasso/make-uninstaller.py out/app-release.apk remove-magisk.zip tools/picasso/signing
 ```
 
-## Prerequisites: busybox и bootctl
+## Почему именно эти компоненты
 
-APK build требует два файла в `native/out/armeabi-v7a/`:
-
-| Файл | Что это | Где взять |
+| Компонент | Проблема на Tegra 2 | Решение |
 |---|---|---|
-| `busybox` | busybox 1.36.1 на **musl** (не bionic!) | Собрать по [инструкции](../../Docs/howto-build-magisk.md) раздел 6 |
-| `bootctl` | Заглушка exit(1) — picasso не A/B | `echo 'int main(){return 1;}' > bootctl.c && arm-musl-clang bootctl.c -o bootctl` |
+| Rust-код | rustc включает NEON по умолчанию | `target-feature=-neon,-d32,+vfpv3-d16` (native/src/.cargo/config.toml) |
+| libunwind (NDK) | ассемблер использует d16–d31 | `tools/picasso/prebuilt/libunwind-tegra2.a` кладётся в NDK (см. setup-ndk-picasso.sh) |
+| compiler-rt builtins (NDK) | scalbnl и др. с NEON/d16 | `tools/picasso/prebuilt/libaeabi-clean.a` заменяет `libclang_rt.builtins*arm*android*.a` |
+| busybox | статик на bionic тянет NEON из libm | сборка на musl 1.2.5, конфиг и ash-патч в `tools/picasso/` |
+| bootctl | A/B-утилита не нужна (picasso не A/B) | заглушка `int main(){return 1;}` |
 
-**Почему musl, а не bionic?** Статическая линковка bionic тянет NEON из libm (pow, strtod, qsort) → SIGILL на Tegra 2. Musl — чистый C без NEON.
+### Критичный патч busybox
 
-**Важно:** busybox требует патч ash.c (добавить `standalone` в set -o таблицу) — Magisk's ensure_bb проверяет эту опцию. Детали в howto-build-magisk.md.
+В `shell/ash.c` опция `standalone` добавлена в таблицу `optletters_optnames[]` —
+Magisk `ensure_bb` проверяет `set -o | grep standalone`.
+Патч: `tools/picasso/busybox-ash-standalone.patch`, конфиг: `tools/picasso/busybox.config`.
+
+### Про подпись удалятора
+
+Старые CWM-рекавери ожидают JAR-структуру в zip. `make-uninstaller.py` создаёт
+`META-INF/MANIFEST.MF` (SHA1-дайджесты), `CERT.SF`, `CERT.RSA` (PKCS#7, openssl) и
+подписывает самоподписанным `CN=picasso` (ключ генерируется при первом запуске в
+`tools/picasso/signing/`, в git не попадает).
+
+## Что изменено относительно upstream v31.1
+
+| Область | Изменение |
+|---|---|
+| Rust target | `armv7-linux-androideabi` + `-neon,-d32,+vfpv3-d16` |
+| NDK | r30-beta2 (clang 21.0.0 9f872551, rustc 1.97.1-nightly) + подмены unwind/builtins |
+| busybox | musl-сборка (не bionic!), ash standalone |
+| Менеджер | `checkUpdate=false` — официальные обновления содержат NEON |
+| Установщик | поиск boot без by-name (mmcblk0p2), конвертация легаси-cpio, ext4 |
+| preinit | service.d-симлинк для env_check |
+
+Все правки в коде помечены `PICASSO`.
 
 ## Установка на планшет
 
 1. CWM Recovery → install → `Magisk-v31.1-picasso.zip`
 2. Перезагрузка
-3. Magisk приложение → Superuser → Grant для приложений
+3. Magisk → Superuser → Grant (интерактивного su-диалога в v31 нет)
 
-## Что изменено (один коммит `403a6e2` поверх v31.1)
+## Известные ограничения
 
-| Область | Изменение |
-|---|---|
-| Rust target | `armv7-linux-androideabi` + `-neon,-d32,+vfp3d16` |
-| NDK флаги | `-mfpu=vfpv3-d16` + `-mattr=-neon,-d32` |
-| busybox | Локальная сборка (не с magisk-files — там NEON) |
-| Менеджер | `checkUpdate=false`, `versionCode=99999` |
-| Установщик | Поиск boot-раздела, конвертация cpio, монтирование ext4 |
-| preinit | Симлинк service.d (env_check требует block device) |
+- Нет интерактивного su-диалога — только через менеджер
+- `content.jar` Android 7.1 не понимает `--user current`/`--ei` (логи su не долетают)
+- env_check требует `-b /sbin/.magisk/device/preinit` — решено service.d-скриптом
 
-## Обновление на новую версию Magisk
+## Обновление форка до новой версии Magisk
 
 ```bash
+git remote add upstream https://github.com/topjohnwu/Magisk.git  # один раз
 git fetch upstream
 git checkout -b picasso-noNEON-v32 upstream/v32.0
-git cherry-pick 403a6e2   # наш коммит
-# Конфликты — все изменения помечены "PICASSO"
+git cherry-pick <picasso-коммиты>   # найти: git log --oneline --grep=picasso
 ```
 
-## ⚠️ НИКОГДА не обновляйте из приложения!
+## Связанные репозитории
 
-Официальные обновления содержат NEON → SIGILL → бутлуп на Tegra 2.
-
-## Благодарности
-
-- [**topjohnwu**](https://github.com/topjohnwu) (John Wu) — Magisk v31.1
-- [**beeline09**](https://github.com/beeline09) — noNEON порт для Tegra 2
+- [picasso-android-kernel](https://github.com/beeline09/picasso-android-kernel) — ядро 3.8.13.28
+- [android_picasso](https://github.com/beeline09/android_picasso) — device trees + патчи платформы
 
 ## Лицензия
 
-GPL v3 (наследует Magisk).
-
----
----
-
-# Оригинальное описание Magisk (ниже)
-
-*Following is the original Magisk README by topjohnwu:*
-
-![](docs/images/logo.png)
-
-[![Downloads](https://img.shields.io/badge/dynamic/json?color=green&label=Downloads&query=totalString&url=https%3A%2F%2Fraw.githubusercontent.com%2Ftopjohnwu%2Fmagisk-files%2Fcount%2Fcount.json&cacheSeconds=1800)](https://raw.githubusercontent.com/topjohnwu/magisk-files/count/count.json)
-
-#### This is not an officially supported Google product
-
-## Introduction
-
-Magisk is a suite of open source software for customizing Android, supporting devices higher than Android 7.0.<br>
-Some highlight features:
-
-- **MagiskSU**: Provide root access for applications
-- **Magisk Modules**: Modify read-only partitions by installing modules
-- **MagiskBoot**: The most complete tool for unpacking and repacking Android boot images
-- **Zygisk**: Run code in every Android applications' processes
-
-## Downloads
-
-[Github](https://github.com/topjohnwu/Magisk/releases) is the only source where you can get official Magisk information and downloads.
-
-## Useful Links
-
-- [Installation Instruction](https://topjohnwu.github.io/Magisk/install.html)
-- [Building and Development](https://topjohnwu.github.io/Magisk/build.html)
-- [Magisk Documentation](https://topjohnwu.github.io/Magisk/)
-- [Zygisk module sample](https://github.com/topjohnwu/zygisk-module-sample)
-
-## Bug Reports
-
-**Only bug reports from Debug builds will be accepted.**
-
-For installation issues, upload both boot image and install logs.<br>
-For Magisk issues, upload boot logcat or dmesg.<br>
-For Magisk app crashes, record and upload the logcat when the crash occurs.
-
-## Translation Contributions
-
-Default string resources for the Magisk app are located here:
-
-- `app/core/src/main/res/values/strings.xml`
-
-Translate each and place them in the respective locations (`[module]/src/main/res/values-[lang]/strings.xml`).
-
-## License
-
-    Magisk, including all git submodules are free software:
-    you can redistribute it and/or modify it under the terms of the
-    GNU General Public License as published by the Free Software Foundation,
-    either version 3 of the License, or (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+GPL v3. См. [COPYING](COPYING).
